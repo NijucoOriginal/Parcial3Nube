@@ -25,8 +25,8 @@ const (
 	MARIADB_DISK      = `C:\Users\NICOLAS PEÑA RINCON\VirtualBox VMs\mariadb\mariadb-disk1.vdi`
 	POSTGRES_DISK     = `C:\Users\NICOLAS PEÑA RINCON\VirtualBox VMs\postgresSQl\postgresSQl-disk1.vdi`
 	HOST_ONLY_NET     = "VirtualBox Host-Only Ethernet Adapter"
-	HOST_ONLY_PREFIX  = "192.168.56."
-	HOST_ONLY_BCAST   = "192.168.56.255"
+	HOST_ONLY_PREFIX  = "192.168.10."
+	HOST_ONLY_BCAST   = "192.168.10.255"
 )
 
 // ─── Modelos ──────────────────────────────────────────────────────────────────
@@ -36,10 +36,10 @@ type Instance struct {
 	DBName    string
 	DBUser    string
 	DBPass    string
-	Engine    string // "mariadb" o "postgresql"
+	Engine    string
 	IP        string
 	MAC       string
-	State     string // "en ejecución" | "apagada"
+	State     string
 	CreatedAt time.Time
 	AccessCmd string
 }
@@ -79,12 +79,20 @@ func vbox(args ...string) (string, error) {
 func getMACAddress(vmName string) (string, error) {
 	out, err := vbox("showvminfo", vmName, "--machinereadable")
 	if err != nil {
+		addLog(fmt.Sprintf("DEBUG getMACAddress error showvminfo: %v", err))
 		return "", err
 	}
+	addLog(fmt.Sprintf("DEBUG showvminfo output para %s obtenido", vmName))
 	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "macaddress2=") {
-			mac := strings.Trim(strings.Split(line, "=")[1], `"`)
-			return formatMAC(mac), nil
+			mac := strings.Split(line, "=")[1]
+			mac = strings.TrimSpace(mac)
+			mac = strings.Trim(mac, `"'`)
+			mac = strings.TrimSpace(mac)
+			formatted := formatMAC(mac)
+			addLog(fmt.Sprintf("DEBUG MAC raw: '%s' → formateada: '%s'", mac, formatted))
+			return formatted, nil
 		}
 	}
 	return "", fmt.Errorf("MAC no encontrada para %s", vmName)
@@ -92,9 +100,9 @@ func getMACAddress(vmName string) (string, error) {
 
 // formatMAC convierte "080027AABBCC" a "08:00:27:aa:bb:cc"
 func formatMAC(raw string) string {
-	raw = strings.ToLower(raw)
+	raw = strings.ToLower(strings.TrimSpace(raw))
 	parts := make([]string, 0, 6)
-	for i := 0; i < len(raw)-1; i += 2 {
+	for i := 0; i+1 < len(raw); i += 2 {
 		parts = append(parts, raw[i:i+2])
 	}
 	return strings.Join(parts, ":")
@@ -102,25 +110,35 @@ func formatMAC(raw string) string {
 
 // getIPByMAC busca en la tabla ARP la IP correspondiente a una MAC
 func getIPByMAC(mac string) (string, error) {
-	// Ping broadcast para poblar la tabla ARP
-	exec.Command("ping", "-n", "3", "-w", "500", HOST_ONLY_BCAST).Run()
+	// Ping a todo el rango para poblar la tabla ARP
+	addLog(fmt.Sprintf("DEBUG haciendo ping al rango 192.168.10.10-100..."))
+	for i := 10; i <= 100; i++ {
+		ip := fmt.Sprintf("192.168.10.%d", i)
+		exec.Command("ping", "-n", "1", "-w", "100", ip).Run()
+	}
 
 	out, err := exec.Command("arp", "-a").Output()
 	if err != nil {
+		addLog(fmt.Sprintf("DEBUG error ejecutando arp -a: %v", err))
 		return "", err
 	}
 
-	mac = strings.ToLower(mac)
-	// Windows muestra MACs con guiones: 08-00-27-aa-bb-cc
+	mac = strings.ToLower(strings.TrimSpace(mac))
 	macDash := strings.ReplaceAll(mac, ":", "-")
+	addLog(fmt.Sprintf("DEBUG buscando MAC '%s' o '%s' en tabla ARP", mac, macDash))
 
-	for _, line := range strings.Split(string(out), "\n") {
+	// Mostrar tabla ARP completa en logs para debug
+	arpOutput := string(out)
+	addLog(fmt.Sprintf("DEBUG tabla ARP: %s", strings.ReplaceAll(arpOutput, "\n", " | ")))
+
+	for _, line := range strings.Split(arpOutput, "\n") {
 		lineLower := strings.ToLower(line)
 		if strings.Contains(lineLower, macDash) || strings.Contains(lineLower, mac) {
 			fields := strings.Fields(line)
 			if len(fields) >= 1 {
 				ip := fields[0]
 				if strings.HasPrefix(ip, HOST_ONLY_PREFIX) {
+					addLog(fmt.Sprintf("DEBUG IP encontrada: %s para MAC %s", ip, mac))
 					return ip, nil
 				}
 			}
@@ -132,6 +150,7 @@ func getIPByMAC(mac string) (string, error) {
 // waitForIP espera hasta que la VM tenga IP asignada por DHCP (máx 2 minutos)
 func waitForIP(mac string) (string, error) {
 	for i := 0; i < 24; i++ {
+		addLog(fmt.Sprintf("DEBUG intento %d/24 buscando IP para MAC %s", i+1, mac))
 		ip, err := getIPByMAC(mac)
 		if err == nil && ip != "" {
 			return ip, nil
@@ -149,10 +168,12 @@ func generatePassword() string {
 // ─── SSH ──────────────────────────────────────────────────────────────────────
 
 func sshConnect(ip string) (*ssh.Client, error) {
+	addLog(fmt.Sprintf("DEBUG intentando conectar SSH a %s...", ip))
 	key, err := readPrivateKey(SSH_KEY_PATH)
 	if err != nil {
 		return nil, fmt.Errorf("error leyendo llave SSH: %v", err)
 	}
+	addLog("DEBUG llave SSH leída correctamente")
 
 	config := &ssh.ClientConfig{
 		User:            SSH_USER,
@@ -161,24 +182,38 @@ func sshConnect(ip string) (*ssh.Client, error) {
 		Timeout:         10 * time.Second,
 	}
 
-	return ssh.Dial("tcp", ip+":22", config)
+	client, err := ssh.Dial("tcp", ip+":22", config)
+	if err != nil {
+		addLog(fmt.Sprintf("DEBUG error conectando SSH: %v", err))
+		return nil, err
+	}
+	addLog(fmt.Sprintf("DEBUG SSH conectado exitosamente a %s", ip))
+	return client, nil
 }
 
 func readPrivateKey(path string) (ssh.Signer, error) {
 	out, err := exec.Command("cmd", "/C", "type", path).Output()
 	if err != nil {
+		addLog(fmt.Sprintf("DEBUG error leyendo llave desde %s: %v", path, err))
 		return nil, err
 	}
+	addLog(fmt.Sprintf("DEBUG llave leída desde %s (%d bytes)", path, len(out)))
 	return ssh.ParsePrivateKey(out)
 }
 
 func runSSH(client *ssh.Client, cmd string) (string, error) {
+	addLog(fmt.Sprintf("DEBUG ejecutando SSH: %s", cmd))
 	sess, err := client.NewSession()
 	if err != nil {
 		return "", err
 	}
 	defer sess.Close()
 	out, err := sess.CombinedOutput(cmd)
+	if err != nil {
+		addLog(fmt.Sprintf("DEBUG error SSH cmd '%s': %v | output: %s", cmd, err, string(out)))
+	} else {
+		addLog(fmt.Sprintf("DEBUG SSH cmd OK: %s", cmd))
+	}
 	return string(out), err
 }
 
@@ -287,21 +322,27 @@ func ProvisionHandler(w http.ResponseWriter, r *http.Request) {
 
 		// 1. Crear nueva VM
 		addLog(fmt.Sprintf("Creando VM %s a partir de plantilla %s", vmName, templateName))
-		if _, err := vbox("createvm", "--name", vmName, "--ostype", "Debian_64", "--register"); err != nil {
-			addLog(fmt.Sprintf("ERROR creando VM: %v", err))
+		out, err := vbox("createvm", "--name", vmName, "--ostype", "Debian_64", "--register")
+		if err != nil {
+			addLog(fmt.Sprintf("ERROR creando VM: %v | output: %s", err, out))
 			return
 		}
+		addLog(fmt.Sprintf("DEBUG VM %s creada", vmName))
 
 		// 2. Configurar hardware
-		vbox("modifyvm", vmName, "--memory", "1024", "--cpus", "1")
-		vbox("modifyvm", vmName, "--nic1", "nat")
-		vbox("modifyvm", vmName, "--nic2", "hostonly", "--hostonlyadapter2", HOST_ONLY_NET)
+		out, err = vbox("modifyvm", vmName, "--memory", "1024", "--cpus", "1")
+		addLog(fmt.Sprintf("DEBUG modifyvm memoria: err=%v out=%s", err, out))
+		out, err = vbox("modifyvm", vmName, "--nic1", "nat")
+		addLog(fmt.Sprintf("DEBUG modifyvm nic1: err=%v out=%s", err, out))
+		out, err = vbox("modifyvm", vmName, "--nic2", "hostonly", "--hostonlyadapter2", HOST_ONLY_NET)
+		addLog(fmt.Sprintf("DEBUG modifyvm nic2: err=%v out=%s", err, out))
 
 		// 3. Adjuntar controlador SATA
-		vbox("storagectl", vmName, "--name", "SATA", "--add", "sata", "--controller", "IntelAHCI")
+		out, err = vbox("storagectl", vmName, "--name", "SATA", "--add", "sata", "--controller", "IntelAHCI")
+		addLog(fmt.Sprintf("DEBUG storagectl: err=%v out=%s", err, out))
 
 		// 4. Adjuntar disco multiconexión
-		vbox("storageattach", vmName,
+		out, err = vbox("storageattach", vmName,
 			"--storagectl", "SATA",
 			"--port", "0",
 			"--device", "0",
@@ -309,8 +350,10 @@ func ProvisionHandler(w http.ResponseWriter, r *http.Request) {
 			"--medium", diskPath,
 			"--mtype", "multiattach",
 		)
+		addLog(fmt.Sprintf("DEBUG storageattach: err=%v out=%s", err, out))
 
-		// 5. Obtener MAC antes de iniciar
+		// 5. Esperar y obtener MAC
+		time.Sleep(2 * time.Second)
 		mac, err := getMACAddress(vmName)
 		if err != nil {
 			addLog(fmt.Sprintf("ERROR obteniendo MAC: %v", err))
@@ -320,8 +363,9 @@ func ProvisionHandler(w http.ResponseWriter, r *http.Request) {
 
 		// 6. Iniciar VM
 		addLog(fmt.Sprintf("Iniciando VM %s...", vmName))
-		if _, err := vbox("startvm", vmName, "--type", "headless"); err != nil {
-			addLog(fmt.Sprintf("ERROR iniciando VM: %v", err))
+		out, err = vbox("startvm", vmName, "--type", "headless")
+		if err != nil {
+			addLog(fmt.Sprintf("ERROR iniciando VM: %v | output: %s", err, out))
 			return
 		}
 		addLog(fmt.Sprintf("Creación de la MV con %s para la ejecución de la base de datos %s", engine, dbName))
@@ -336,6 +380,7 @@ func ProvisionHandler(w http.ResponseWriter, r *http.Request) {
 		addLog(fmt.Sprintf("IP asignada a %s: %s", vmName, ip))
 
 		// 8. Esperar a que SSH esté disponible
+		addLog("DEBUG esperando 20s para que SSH esté disponible...")
 		time.Sleep(20 * time.Second)
 
 		// 9. Conectar por SSH
@@ -347,12 +392,14 @@ func ProvisionHandler(w http.ResponseWriter, r *http.Request) {
 		defer client.Close()
 
 		// 10. Cambiar hostname
+		addLog(fmt.Sprintf("DEBUG cambiando hostname a %s", vmName))
 		if err := setHostname(client, vmName); err != nil {
 			addLog(fmt.Sprintf("WARN cambiando hostname: %v", err))
 		}
 
 		// 11. Crear BD y usuario según motor
 		if engine == "mariadb" {
+			addLog("DEBUG configurando MariaDB...")
 			if err := setupMariaDB(client, dbName, dbUser, dbPass); err != nil {
 				addLog(fmt.Sprintf("ERROR configurando MariaDB: %v", err))
 				return
@@ -361,6 +408,7 @@ func ProvisionHandler(w http.ResponseWriter, r *http.Request) {
 				runSSH(client, fmt.Sprintf("sudo mysql -u root %s -e \"%s\"", dbName, sqlContent))
 			}
 		} else {
+			addLog("DEBUG configurando PostgreSQL...")
 			if err := setupPostgreSQL(client, dbName, dbUser, dbPass); err != nil {
 				addLog(fmt.Sprintf("ERROR configurando PostgreSQL: %v", err))
 				return
