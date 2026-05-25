@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Servicio administrado de Bases de Datos</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #f4f4f0;
+    --surface: #ffffff;
+    --surface2: #e8e8e2;
+    --border: #c8c8b8;
+    --accent: #7a8a2e;
+    --accent2: #5a6a1e;
+    --text: #1a1a14;
+    --text2: #4a4a3a;
+    --green: #2d7a2d;
+    --red: #b83232;
+    --orange: #b86820;
+    --mariadb: #c0522a;
+    --postgres: #336791;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 2px solid var(--accent);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  header svg { width: 32px; height: 32px; }
+
+  header h1 {
+    font-family: var(--sans);
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--accent2);
+    letter-spacing: -0.02em;
+  }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 28px 24px; }
+
+  /* ── Formulario ── */
+  .form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 28px 32px;
+    margin-bottom: 28px;
+  }
+
+  .form-card h2 {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text2);
+    margin-bottom: 20px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text2);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .field input[type="text"], .field input[type="file"] {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    background: var(--bg);
+    color: var(--text);
+    transition: border-color 0.15s;
+  }
+
+  .field input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: #fff;
+  }
+
+  .engine-row {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    margin-bottom: 20px;
+  }
+
+  .engine-row span {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .engine-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .engine-option input[type="radio"] { accent-color: var(--accent); }
+
+  .engine-option .badge {
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: var(--mono);
+  }
+
+  .badge-mariadb { background: #fde8df; color: var(--mariadb); border: 1px solid #f0c0a8; }
+  .badge-postgres { background: #dde8f5; color: var(--postgres); border: 1px solid #a8c0e0; }
+
+  .btn-create {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 10px 28px;
+    border-radius: 3px;
+    font-family: var(--sans);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+    transition: background 0.15s;
+  }
+
+  .btn-create:hover { background: var(--accent2); }
+
+  /* ── Layout principal ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text2);
+  }
+
+  /* ── Instancias ── */
+  .instances-list { padding: 12px; }
+
+  .instance-card {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+
+  .instance-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .engine-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    font-weight: 700;
+    font-family: var(--mono);
+    flex-shrink: 0;
+  }
+
+  .icon-mariadb { background: #fde8df; color: var(--mariadb); border: 1px solid #f0c0a8; }
+  .icon-postgres { background: #dde8f5; color: var(--postgres); border: 1px solid #a8c0e0; }
+
+  .instance-name { flex: 1; }
+  .instance-name strong { display: block; font-size: 0.95rem; font-weight: 600; }
+  .instance-name small { font-size: 0.75rem; color: var(--text2); font-family: var(--mono); }
+
+  .instance-body { padding: 10px 14px; }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .status {
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
+  .status.running { color: var(--green); }
+  .status.stopped { color: var(--orange); }
+
+  .actions { display: flex; gap: 6px; }
+
+  .btn-sm {
+    padding: 5px 12px;
+    border: none;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--sans);
+    text-decoration: none;
+    display: inline-block;
+  }
+
+  .btn-delete { background: var(--red); color: #fff; }
+  .btn-delete:hover { background: #8a2020; }
+  .btn-stop { background: var(--green); color: #fff; }
+  .btn-stop:hover { background: #1a5a1a; }
+
+  .conn-info {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--text2);
+    line-height: 1.7;
+  }
+
+  .conn-info span { color: var(--text); font-weight: 600; }
+
+  /* ── Logs ── */
+  .logs-body {
+    padding: 14px 16px;
+    max-height: 340px;
+    overflow-y: auto;
+  }
+
+  .log-entry {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--surface2);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    font-family: var(--mono);
+  }
+
+  .log-entry:last-child { border-bottom: none; }
+
+  .log-ts {
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 8px;
+  }
+
+  .log-msg { color: var(--text2); }
+
+  .empty-state {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text2);
+    font-size: 0.85rem;
+  }
+
+  /* ── Spinner ── */
+  .spinner {
+    display: none;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <svg viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="6" fill="#7a8a2e"/>
+    <rect x="6" y="10" width="20" height="14" rx="2" fill="white" opacity="0.9"/>
+    <rect x="10" y="7" width="12" height="5" rx="1" fill="white" opacity="0.6"/>
+    <circle cx="11" cy="17" r="1.5" fill="#7a8a2e"/>
+    <circle cx="16" cy="17" r="1.5" fill="#7a8a2e"/>
+    <circle cx="21" cy="17" r="1.5" fill="#7a8a2e"/>
+  </svg>
+  <h1>Servicio administrado de Bases de Datos</h1>
+</header>
+
+<div class="container">
+
+  <!-- Formulario -->
+  <div class="form-card">
+    <h2>Nueva instancia</h2>
+    <form method="POST" action="/api/provision" enctype="multipart/form-data" onsubmit="showSpinner(this)">
+      <div class="form-grid">
+        <div class="field">
+          <label>Nombre de la máquina virtual</label>
+          <input type="text" name="vmName" placeholder="ej: vm-clientes" required>
+        </div>
+        <div class="field">
+          <label>Usuario administrado</label>
+          <input type="text" name="dbUser" placeholder="ej: admin1" required>
+        </div>
+        <div class="field">
+          <label>Esquema de base de datos</label>
+          <input type="text" name="dbName" placeholder="ej: Clientes" required>
+        </div>
+        <div class="field">
+          <label>Archivo SQL (opcional)</label>
+          <input type="file" name="sqlFile" accept=".sql">
+        </div>
+      </div>
+      <div class="engine-row">
+        <span>Motor</span>
+        <label class="engine-option">
+          <input type="radio" name="engine" value="mariadb" checked>
+          <span class="badge badge-mariadb">MariaDB</span>
+        </label>
+        <label class="engine-option">
+          <input type="radio" name="engine" value="postgresql">
+          <span class="badge badge-postgres">PostgreSQL</span>
+        </label>
+      </div>
+      <button type="submit" class="btn-create">
+        Crear archivo
+        <span class="spinner" id="spinner"></span>
+      </button>
+    </form>
+  </div>
+
+  <!-- Grid principal -->
+  <div class="main-grid">
+
+    <!-- Instancias -->
+    <div class="panel">
+      <div class="panel-header">Instancias</div>
+      <div class="instances-list" id="instances-list">
+        {{ if not .Instances }}
+        <div class="empty-state">No hay instancias activas</div>
+        {{ end }}
+        {{ range .Instances }}
+        <div class="instance-card">
+          <div class="instance-head">
+            {{ if eq .Engine "mariadb" }}
+            <div class="engine-icon icon-mariadb">MDB</div>
+            {{ else }}
+            <div class="engine-icon icon-postgres">PG</div>
+            {{ end }}
+            <div class="instance-name">
+              <strong>{{ .DBName }}</strong>
+              <small>{{ .DBUser }}</small>
+            </div>
+          </div>
+          <div class="instance-body">
+            <div class="status-row">
+              <span class="status {{ if eq .State "en ejecución" }}running{{ else }}stopped{{ end }}">
+                Estado: {{ .State }}
+              </span>
+              <div class="actions">
+                <a href="/api/instances/delete?vm={{ .VMName }}" class="btn-sm btn-delete"
+                   onclick="return confirm('¿Eliminar {{ .VMName }}?')">Eliminar</a>
+                <a href="/api/instances/stop?vm={{ .VMName }}" class="btn-sm btn-stop">Apagar</a>
+              </div>
+            </div>
+            <div class="conn-info">
+              <span>Host:</span> {{ .IP }}<br>
+              <span>Usuario:</span> {{ .DBUser }}<br>
+              <span>Contraseña:</span> {{ .DBPass }}<br>
+              {{ if eq .Engine "mariadb" }}
+              <span>Acceso:</span> mariadb -u root -p{{ .DBPass }}<br>
+              {{ else }}
+              <span>Acceso:</span> postgresql -u root -p{{ .DBPass }}<br>
+              {{ end }}
+            </div>
+          </div>
+        </div>
+        {{ end }}
+      </div>
+    </div>
+
+    <!-- Monitorización -->
+    <div class="panel">
+      <div class="panel-header">Monitorización</div>
+      <div class="logs-body" id="logs-body">
+        {{ if not .Logs }}
+        <div class="empty-state">Sin actividad registrada</div>
+        {{ end }}
+        {{ range .Logs }}
+        <div class="log-entry">
+          <span class="log-ts">[{{ .Timestamp }}]</span>
+          <span class="log-msg">{{ .Message }}</span>
+        </div>
+        {{ end }}
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function showSpinner(form) {
+    document.getElementById('spinner').style.display = 'inline-block';
+  }
+
+  // Auto-refresh cada 5 segundos para ver nuevas instancias y logs
+  setInterval(() => { location.reload(); }, 5000);
+</script>
+
+</body>
+</html>
